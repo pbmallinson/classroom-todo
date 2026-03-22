@@ -1,46 +1,29 @@
 # classroom-todo
 
 Terminal view of Google Classroom assignments across multiple students.
+Shows not-turned-in and missing items with due dates, sorted future → overdue.
 
 ```
-══════════════════════════════════════════════════════════════════════
-  Arlo
-══════════════════════════════════════════════════════════════════════
-
-  NEW TODAY (2)
-  ──────────────────────────────────────────────────────────────────
-  English                   Write a sonnet                           Fri 28 Mar
-  Biology                   Cell division quiz prep                  tomorrow
-
-  DUE SOON — next 5 days (3)
-  ──────────────────────────────────────────────────────────────────
-  Maths                     Quadratics worksheet                     today (OVERDUE)
-  History                   WW1 essay draft                          Thu 27 Mar
-  Chemistry                 Lab report                               Sat 29 Mar
-
-  OUTSTANDING (12)
-  ──────────────────────────────────────────────────────────────────
-  ...
+════════════════════════════════════════════════════════════════════════
+  Ben
+════════════════════════════════════════════════════════════════════════
+  68    Fri, 29 May    11 DVC 2026       Fragrance Design
+   8    Mon, 30 Mar    11 GEO BR 2026    ASSESSMENT - The Bradshaw Model
+  -2    Fri, 20 Mar    11 MAT MM 2026    T1W8 Kiwisaver, Homes, Budgeting
 ```
+
+Tab-separated — paste directly into Excel.
 
 ## Setup
 
-### 1. Google Cloud project (once only)
-
-1. Go to [console.cloud.google.com](https://console.cloud.google.com)
-2. Create a new project (name it anything)
-3. Enable the **Google Classroom API**
-4. Go to **APIs & Services → Credentials → Create Credentials → OAuth client ID**
-5. Application type: **Desktop app**
-6. Download the JSON and save it as `credentials.json` in this directory
-
-### 2. Install dependencies
+### 1. Install dependencies
 
 ```bash
 npm install
+npx playwright install chromium
 ```
 
-### 3. Configure your kids
+### 2. Configure your kids
 
 ```bash
 cp config/kids.example.yml config/kids.yml
@@ -50,21 +33,21 @@ Edit `config/kids.yml`:
 
 ```yaml
 kids:
-  - name: Arlo
+  - name: Ben
   - name: Isla
 ```
 
-### 4. Authorise each student (once per kid)
+### 3. Log in for each student (once per kid)
 
 ```bash
-npm run auth Arlo
+npm run login Ben
 ```
 
-This opens a browser URL. Log in as the student, approve access, paste the code back into the terminal. Token is saved to `tokens/arlo.json` — you won't need to repeat this.
+A browser window opens. Log in as the student, wait until you can see Classroom, then press Enter in the terminal. Session is saved to `sessions/ben/` — you won't need to repeat this unless Google invalidates the session.
 
 Repeat for each kid.
 
-### 5. Run
+### 4. Run
 
 ```bash
 npm run todo
@@ -72,6 +55,6 @@ npm run todo
 
 ## Notes
 
-- Tokens refresh automatically — no need to re-auth
-- `credentials.json` and `tokens/` are gitignored — keep them safe
-- `DUE_SOON_DAYS` in `src/todo.ts` controls the "due soon" window (default: 5 days)
+- Sessions are stored in `sessions/` and are gitignored
+- If a session expires you'll see: `Session expired for Ben — run: npm run login Ben`
+- Only assignments with due dates in the current year are shown
