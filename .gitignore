@@ -1,0 +1,6 @@
+node_modules/
+dist/
+tokens/*.json
+credentials.json
+sessions/
+config/kids.yml

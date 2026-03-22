@@ -1,0 +1,19 @@
+{
+  "name": "classroom-todo",
+  "version": "1.0.0",
+  "description": "Google Classroom todo viewer — new today, due soon, outstanding",
+  "scripts": {
+    "login": "ts-node src/login.ts",
+    "todo": "ts-node src/scrape.ts"
+  },
+  "dependencies": {
+    "googleapis": "^144.0.0",
+    "playwright": "^1.58.2",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.0"
+  }
+}
