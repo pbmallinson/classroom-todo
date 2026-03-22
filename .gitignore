@@ -1,6 +1,6 @@
 node_modules/
 dist/
-tokens/*.json
-credentials.json
 sessions/
+tokens/*.json
+credentials*.json
 config/kids.yml

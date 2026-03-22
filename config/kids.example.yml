@@ -1,3 +1,4 @@
+# make a copy of this file and name it kids.yml, then edit the names of the kids in the list below
 kids:
   - name: kid1
   - name: kid2
