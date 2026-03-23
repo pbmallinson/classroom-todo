@@ -17,11 +17,30 @@ const SCRAPER = `(() => {
   today.setHours(0, 0, 0, 0);
   const thisYear = today.getFullYear();
 
-  function parseDue(raw) {
+  function parseDue(raw, section) {
     if (!raw) return null;
     const s = raw.replace(/^Due\\s*/i, '').trim();
     if (/^today$/i.test(s))    return new Date(today);
     if (/^tomorrow$/i.test(s)) { const d = new Date(today); d.setDate(d.getDate() + 1); return d; }
+    // Handle weekday-only dates like "Wednesday, 11:59 PM" — resolve via section
+    const DAYS = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+    const dowMatch = s.match(/^(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\\b/i);
+    if (dowMatch) {
+      const target = DAYS.indexOf(dowMatch[1].toLowerCase());
+      // Find Monday of the relevant week based on section
+      const todayDow = today.getDay();
+      const mondayOffset = (todayDow + 6) % 7; // days since last Monday
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() - mondayOffset);
+      if (section === 'LAST_WEEK') weekStart.setDate(weekStart.getDate() - 7);
+      else if (section === 'NEXT_WEEK') weekStart.setDate(weekStart.getDate() + 7);
+      else if (section === 'EARLIER') return null; // too ambiguous
+      // target's offset from Monday in Mon-based week (Mon=0 … Sun=6)
+      const targetOffset = (target + 6) % 7;
+      const d = new Date(weekStart);
+      d.setDate(weekStart.getDate() + targetOffset);
+      return d;
+    }
     const hasYear = /\\b20\\d\\d\\b/.test(s);
     const attempt = hasYear ? s : s + ' ' + thisYear;
     const d = new Date(attempt);
@@ -57,7 +76,7 @@ const SCRAPER = `(() => {
                 || li.querySelector('div.nQaZq p')?.textContent?.trim()
                 || null;
 
-    const dueDate = parseDue(rawDue);
+    const dueDate = parseDue(rawDue, section);
     if (!dueDate || dueDate.getFullYear() !== thisYear) return;
 
     items.push({ title, course, days: diffDays(dueDate), dateStr: fmtDate(dueDate) });
