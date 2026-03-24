@@ -25,7 +25,7 @@ const SCRAPER = `(() => {
     // Handle weekday-only dates like "Wednesday, 11:59 PM" — resolve via section
     const DAYS = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
     const dowMatch = s.match(/^(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\\b/i);
-    if (dowMatch) {
+    if (dowMatch && section !== 'LATER') {
       const target = DAYS.indexOf(dowMatch[1].toLowerCase());
       // Find Monday of the relevant week based on section
       const todayDow = today.getDay();
