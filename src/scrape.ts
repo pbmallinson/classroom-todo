@@ -11,43 +11,62 @@ const URLS = [
   'https://classroom.google.com/a/missing/all',
 ];
 
+const DEBUG = process.env.DEBUG === '1';
+
 // Injected into the page — must be a plain function, no TS types
-const SCRAPER = `(() => {
+const SCRAPER = `((debug) => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const thisYear = today.getFullYear();
 
-  function parseDue(raw, section) {
-    if (!raw) return null;
-    const s = raw.replace(/^Due\\s*/i, '').trim();
-    if (/^today$/i.test(s))    return new Date(today);
-    if (/^tomorrow$/i.test(s)) { const d = new Date(today); d.setDate(d.getDate() + 1); return d; }
-    // Handle weekday-only dates like "Wednesday, 11:59 PM" — resolve via section
-    const DAYS = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
-    const dowMatch = s.match(/^(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\\b/i);
-    if (dowMatch && section !== 'LATER') {
-      const target = DAYS.indexOf(dowMatch[1].toLowerCase());
-      // Find Monday of the relevant week based on section
-      const todayDow = today.getDay();
-      const mondayOffset = (todayDow + 6) % 7; // days since last Monday
-      const weekStart = new Date(today);
-      weekStart.setDate(today.getDate() - mondayOffset);
-      if (section === 'LAST_WEEK') weekStart.setDate(weekStart.getDate() - 7);
-      else if (section === 'NEXT_WEEK') weekStart.setDate(weekStart.getDate() + 7);
-      else if (section === 'EARLIER') return null; // too ambiguous
-      // target's offset from Monday in Mon-based week (Mon=0 … Sun=6)
-      const targetOffset = (target + 6) % 7;
-      const d = new Date(weekStart);
-      d.setDate(weekStart.getDate() + targetOffset);
-      return d;
-    }
+  function parseExplicitDate(s) {
+    if (!s || /^20\\d\\d$/.test(s.trim())) return null; // empty or bare year
+    // Must contain a month name — pure time strings like "11:59 PM" are not dates
+    if (!/(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(s)) return null;
     const hasYear = /\\b20\\d\\d\\b/.test(s);
     const attempt = hasYear ? s : s + ' ' + thisYear;
     const d = new Date(attempt);
-    if (!isNaN(d)) return d;
-    const stripped = s.replace(/^[A-Za-z]{3}\\s+/, '');
-    const d2 = new Date(stripped + ' ' + thisYear);
-    return isNaN(d2) ? null : d2;
+    if (!isNaN(d.getTime())) return d;
+    // DD Mon [YYYY] format (e.g. "31 Mar" or "31 Mar 2026")
+    const dmy = s.match(/^(\\d{1,2})\\s+([A-Za-z]{3,9})(?:[,\\s]+(\\d{4}))?/);
+    if (dmy) {
+      const d2 = new Date(dmy[2] + ' ' + dmy[1] + ' ' + (dmy[3] || thisYear));
+      if (!isNaN(d2.getTime())) return d2;
+    }
+    return null;
+  }
+
+  function parseDue(raw, section) {
+    if (!raw) return null;
+    const s = raw.replace(/^Due\\s*/i, '').trim();
+    // "Today" / "Tomorrow" may have a time suffix like "Tomorrow, 11:59 PM"
+    if (/^today\\b/i.test(s))    return new Date(today);
+    if (/^tomorrow\\b/i.test(s)) { const d = new Date(today); d.setDate(d.getDate() + 1); return d; }
+
+    const DAYS = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+    const dowMatch = s.match(/^(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\\b/i);
+
+    // Strip leading weekday + separator (e.g. "Friday, " or "Fri ") to get the date part
+    const afterWday = dowMatch ? s.replace(/^[A-Za-z]+(?:,\\s*|\\s+)/, '') : s;
+
+    // If there's an explicit date in the string, always prefer it
+    const explicit = parseExplicitDate(afterWday);
+    if (explicit) return explicit;
+
+    // Fall back to weekday resolution for THIS_WEEK / NEXT_WEEK / LAST_WEEK
+    // Google uses Sun-Sat weeks; DAYS indices (0=Sun … 6=Sat) are the offset from Sunday
+    if (dowMatch && !['LATER','EARLIER'].includes(section)) {
+      const target = DAYS.indexOf(dowMatch[1].toLowerCase());
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() - today.getDay()); // back to this Sunday
+      if (section === 'LAST_WEEK') weekStart.setDate(weekStart.getDate() - 7);
+      else if (section === 'NEXT_WEEK') weekStart.setDate(weekStart.getDate() + 7);
+      const d = new Date(weekStart);
+      d.setDate(weekStart.getDate() + target);
+      return d;
+    }
+
+    return null;
   }
 
   function diffDays(d) {
@@ -77,14 +96,19 @@ const SCRAPER = `(() => {
                 || null;
 
     const dueDate = parseDue(rawDue, section);
-    if (!dueDate || dueDate.getFullYear() !== thisYear) return;
+    const yearOk = dueDate && (dueDate.getFullYear() === thisYear || dueDate.getFullYear() === thisYear + 1);
+    if (!yearOk) {
+      if (debug) console.log('[DEBUG skip] section=' + section + ' rawDue=' + JSON.stringify(rawDue) + ' parsed=' + dueDate + ' course=' + course + ' title=' + title);
+      return;
+    }
 
+    if (debug) console.log('[DEBUG ok]   section=' + section + ' rawDue=' + JSON.stringify(rawDue) + ' parsed=' + dueDate?.toISOString()?.slice(0,10) + ' days=' + diffDays(dueDate) + ' course=' + course);
     items.push({ title, course, days: diffDays(dueDate), dateStr: fmtDate(dueDate) });
   });
 
   items.sort((a, b) => b.days - a.days);
   return items;
-})()`;
+})(${DEBUG})`;
 
 async function scrapeKid(kidName: string): Promise<void> {
   const sessionDir = path.join('sessions', kidName.toLowerCase());
@@ -95,6 +119,12 @@ async function scrapeKid(kidName: string): Promise<void> {
 
   const browser = await chromium.launchPersistentContext(sessionDir, { headless: true });
   const page = await browser.newPage();
+
+  if (DEBUG) {
+    page.on('console', msg => {
+      if (msg.text().startsWith('[DEBUG')) process.stderr.write(msg.text() + '\n');
+    });
+  }
 
   // Check session is alive on first URL
   await page.goto(URLS[0], { waitUntil: 'domcontentloaded' });
