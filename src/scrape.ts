@@ -110,64 +110,67 @@ const SCRAPER = `((debug) => {
   return items;
 })(${DEBUG})`;
 
-async function scrapeKid(kidName: string): Promise<void> {
+async function scrapeKid(kidName: string): Promise<string> {
   const sessionDir = path.join('sessions', kidName.toLowerCase());
   if (!fs.existsSync(sessionDir)) {
-    console.error(`  No session for ${kidName} — run: npm run login ${kidName}`);
-    return;
+    return `  No session for ${kidName} — run: npm run login ${kidName}`;
   }
 
   const browser = await chromium.launchPersistentContext(sessionDir, { headless: true });
-  const page = await browser.newPage();
+
+  // Open both pages simultaneously
+  const [page0, page1] = await Promise.all([browser.newPage(), browser.newPage()]);
 
   if (DEBUG) {
-    page.on('console', msg => {
-      if (msg.text().startsWith('[DEBUG')) process.stderr.write(msg.text() + '\n');
-    });
-  }
-
-  // Check session is alive on first URL
-  await page.goto(URLS[0], { waitUntil: 'domcontentloaded' });
-  if (page.url().includes('accounts.google.com')) {
-    console.error(`  Session expired for ${kidName} — run: npm run login ${kidName}`);
-    await browser.close();
-    return;
-  }
-
-  type Item = { days: number; dateStr: string; course: string; title: string };
-  const seen = new Set<string>();
-  const allItems: Item[] = [];
-
-  for (const url of URLS) {
-    await page.goto(url, { waitUntil: 'domcontentloaded' });
-    await page.waitForSelector('li.MHxtic', { timeout: 15000 }).catch(() => null);
-
-    const items = await page.evaluate(SCRAPER) as Item[];
-    for (const item of items) {
-      const key = `${item.course}|${item.title}`;
-      if (!seen.has(key)) { seen.add(key); allItems.push(item); }
+    for (const p of [page0, page1]) {
+      p.on('console', msg => {
+        if (msg.text().startsWith('[DEBUG')) process.stderr.write(msg.text() + '\n');
+      });
     }
   }
 
-  await browser.close();
-  const items = allItems;
+  // Navigate both URLs in parallel (eliminates the redundant session-check load)
+  await Promise.all(URLS.map((url, i) =>
+    [page0, page1][i].goto(url, { waitUntil: 'domcontentloaded' })
+  ));
 
-  items.sort((a, b) => b.days - a.days);
+  if (page0.url().includes('accounts.google.com')) {
+    await browser.close();
+    return `  Session expired for ${kidName} — run: npm run login ${kidName}`;
+  }
+
+  type Item = { days: number; dateStr: string; course: string; title: string };
+
+  // Wait for content and scrape both pages in parallel
+  const [items0, items1] = await Promise.all([page0, page1].map(async p => {
+    await p.waitForSelector('li.MHxtic', { timeout: 15000 }).catch(() => null);
+    return p.evaluate(SCRAPER) as Promise<Item[]>;
+  }));
+
+  await browser.close();
+
+  const seen = new Set<string>();
+  const allItems: Item[] = [];
+  for (const item of [...items0, ...items1]) {
+    const key = `${item.course}|${item.title}`;
+    if (!seen.has(key)) { seen.add(key); allItems.push(item); }
+  }
+
+  allItems.sort((a, b) => b.days - a.days);
 
   const bar = '═'.repeat(72);
-  console.log(`\n${bar}`);
-  console.log(`  ${kidName}`);
-  console.log(bar);
+  const lines = [`\n${bar}`, `  ${kidName}`, bar];
 
-  if (items.length === 0) {
-    console.log('  (nothing outstanding with a due date)');
-    return;
+  if (allItems.length === 0) {
+    lines.push('  (nothing outstanding with a due date)');
+  } else {
+    const maxW = Math.max(...allItems.map(i => String(i.days).length));
+    for (const { days, dateStr, course, title } of allItems) {
+      lines.push(`  ${String(days).padStart(maxW)}\t${dateStr}\t${course}\t${title}`);
+    }
   }
 
-  const maxW = Math.max(...items.map(i => String(i.days).length));
-  for (const { days, dateStr, course, title } of items) {
-    console.log(`  ${String(days).padStart(maxW)}\t${dateStr}\t${course}\t${title}`);
-  }
+  return lines.join('\n');
 }
 
 async function main(): Promise<void> {
@@ -178,10 +181,8 @@ async function main(): Promise<void> {
   }
 
   const config: Config = yaml.parse(fs.readFileSync(configPath, 'utf8'));
-  for (const kid of config.kids) {
-    await scrapeKid(kid.name);
-  }
-  console.log('');
+  const outputs = await Promise.all(config.kids.map(kid => scrapeKid(kid.name)));
+  console.log(outputs.join('\n') + '\n');
 }
 
 main().catch(console.error);
